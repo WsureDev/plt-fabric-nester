@@ -1,0 +1,9 @@
+node_modules/
+dist/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.DS_Store
+Thumbs.db
+*.plt
+nested_output**/

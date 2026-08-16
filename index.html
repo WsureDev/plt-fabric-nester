@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PLT 布料紧凑排版</title>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">激光裁剪排版</p>
+          <h1>PLT 布料紧凑排版</h1>
+        </div>
+        <output id="status" aria-live="polite">请选择 PLT 文件开始排版。</output>
+      </header>
+      <section class="workbench">
+        <form id="settings" class="controls">
+          <label class="file-control" for="plt-file">
+            <span>源 PLT 文件</span>
+            <input id="plt-file" type="file" accept=".plt,text/plain" />
+          </label>
+          <p id="selected-file" class="selected-file">尚未选择 PLT 文件</p>
+          <div class="field-grid">
+            <label>布宽 <input name="width" type="number" min="1" step="1" /> <small>毫米</small></label>
+            <label>裁片间距 <input name="clearance" type="number" min="0" step="0.1" /> <small>毫米</small></label>
+            <label>边缘留量 <input name="edge" type="number" min="0" step="0.1" /> <small>毫米</small></label>
+            <label>排版栅格 <input name="grid" type="number" min="0.5" step="0.5" /> <small>毫米</small></label>
+            <label>余料长度 <input name="remaining" type="number" min="1" step="1" placeholder="可选" /> <small>毫米</small></label>
+            <label>搜索强度 <select name="effort"><option value="quick" selected>快速</option><option value="standard">标准</option><option value="thorough">细致</option></select></label>
+          </div>
+          <label class="check"><input name="quarter" type="checkbox" /> 允许 90 度旋转（需确认布料纹向）</label>
+          <button id="run" class="primary" type="submit">开始排版</button>
+        </form>
+        <section id="results" class="results" aria-live="polite">
+          <p class="empty">排版结果和审核预览会显示在这里。</p>
+        </section>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
