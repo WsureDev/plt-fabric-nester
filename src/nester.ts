@@ -444,7 +444,7 @@ export function packingSummary(packing: Packing, plan: NestPlan): Record<string,
 }
 
 export function nestHpgl(text: string, requested: Partial<NestSettings> = {}): NestResult {
-  const settings = { ...DEFAULT_SETTINGS, ...requested };
+  const settings: NestSettings = { ...DEFAULT_SETTINGS, ...requested, remainingLengthMm: requested.remainingLengthMm ?? DEFAULT_SETTINGS.remainingLengthMm };
   if (settings.fabricWidthMm <= 0 || settings.unitsPerMm <= 0 || settings.gridMm <= 0 || settings.clearanceMm < 0) throw new Error("布宽、单位换算和栅格必须为正数，裁片间距不能为负数。");
   const paths = parseHpgl(text);
   const parts = identifyParts(paths, settings.unitsPerMm, settings.minPartAreaMm2);

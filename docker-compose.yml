@@ -11,3 +11,8 @@ services:
       dockerfile: Dockerfile.mcp
     stdin_open: true
     tty: false
+    ports:
+      - "8765:8765"
+    environment:
+      MCP_FILE_HOST: 0.0.0.0
+      MCP_PUBLIC_BASE_URL: http://127.0.0.1:8765
