@@ -1,0 +1,13 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    stdin_open: true
+    tty: false
