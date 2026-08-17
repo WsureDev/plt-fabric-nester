@@ -22,10 +22,10 @@ npm run dev
 
 ```powershell
 docker build -t plt-fabric-nester:latest .
-docker run --rm -p 8080:80 plt-fabric-nester:latest
+docker run --rm -p 18191:80 plt-fabric-nester:latest
 ```
 
-浏览器访问 `http://localhost:8080/`。也可以使用 `docker compose up --build web`。
+浏览器访问 `http://localhost:18191/`。也可以使用 `docker compose up --build web`。
 
 ## MCP 服务
 
@@ -38,7 +38,7 @@ MCP 服务通过标准输入输出与 LLM 客户端通信，不需要 HTTP 端�
 `nest_plt` 和 `preview_plt` 都支持设置布宽、裁片间距、边缘留量、栅格、单位换算、
 余料长度、是否允许 90 度旋转和排版强度。工具会返回 `pltUrl`、`pngUrl` 和
 `manifestUrl`，其中预览始终是 PNG，不生成 SVG。下载地址由 MCP 内置文件服务提供，
-默认监听 `127.0.0.1:8765`；可通过 `MCP_OUTPUT_DIR`、`MCP_FILE_HOST`、
+默认监听 `127.0.0.1:8765`；Compose 会将它发布到主机的 `18192` 端口。可通过 `MCP_OUTPUT_DIR`、`MCP_FILE_HOST`、
 `MCP_FILE_PORT`、`MCP_PUBLIC_BASE_URL` 环境变量调整输出目录和地址。
 
 本地启动：
@@ -52,9 +52,9 @@ Docker 启动：
 
 ```powershell
 docker build -f Dockerfile.mcp -t plt-fabric-nester-mcp:latest .
-docker run --rm -i -p 8765:8765 `
+docker run --rm -i -p 18192:8765 `
   -e MCP_FILE_HOST=0.0.0.0 `
-  -e MCP_PUBLIC_BASE_URL=http://127.0.0.1:8765 `
+  -e MCP_PUBLIC_BASE_URL=http://127.0.0.1:18192 `
   plt-fabric-nester-mcp:latest
 ```
 
@@ -66,9 +66,9 @@ MCP 客户端配置示例：
     "plt-fabric-nester": {
       "command": "docker",
       "args": [
-        "run", "--rm", "-i", "-p", "8765:8765",
+        "run", "--rm", "-i", "-p", "18192:8765",
         "-e", "MCP_FILE_HOST=0.0.0.0",
-        "-e", "MCP_PUBLIC_BASE_URL=http://127.0.0.1:8765",
+        "-e", "MCP_PUBLIC_BASE_URL=http://127.0.0.1:18192",
         "plt-fabric-nester-mcp:latest"
       ]
     }
