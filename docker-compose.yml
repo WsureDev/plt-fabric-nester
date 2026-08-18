@@ -11,6 +11,12 @@ services:
       dockerfile: Dockerfile.mcp
     ports:
       - "18192:8765"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       MCP_HTTP_HOST: 0.0.0.0
       MCP_PUBLIC_BASE_URL: http://host.docker.internal:18192
+      MCP_WORKSPACE_PROVIDER: ${MCP_WORKSPACE_PROVIDER:-bay}
+      MCP_BAY_BASE_URL: ${MCP_BAY_BASE_URL:-http://host.docker.internal:8114}
+      MCP_BAY_ACCESS_TOKEN: ${MCP_BAY_ACCESS_TOKEN:-}
+      MCP_WORKSPACE_OUTPUT_DIR: ${MCP_WORKSPACE_OUTPUT_DIR:-.mcp/plt-fabric-nester}

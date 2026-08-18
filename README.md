@@ -30,7 +30,7 @@ docker run --rm -p 18191:80 plt-fabric-nester:latest
 ## MCP 服务
 
 MCP 服务通过 Streamable HTTP 提供，端点为 `POST /mcp`。同一 HTTP 服务也会在
-`/files/*` 提供工具生成的 PLT、PNG 和 JSON 下载文件。提供三个工具：
+`/files/*` 提供工具生成的 PLT、PNG 和 JSON 下载文件。文本模式提供三个工具：
 
 - `analyze_plt`：分析路径、裁片数量、原始尺寸和裁片包围盒
 - `nest_plt`：生成紧凑总版；余料不足时同时返回 A 余料版和 B 新料版 PLT
@@ -42,6 +42,43 @@ MCP 服务通过 Streamable HTTP 提供，端点为 `POST /mcp`。同一 HTTP �
 默认监听 `127.0.0.1:8765`；Compose 会将它发布到主机的 `18192` 端口。可通过 `MCP_OUTPUT_DIR`、`MCP_HTTP_HOST`、
 `MCP_HTTP_PORT`、`MCP_PUBLIC_BASE_URL` 环境变量调整输出目录和地址；`MCP_FILE_HOST` 与
 `MCP_FILE_PORT` 仍兼容为旧环境变量别名。
+
+### workspace 路径模式
+
+为避免把完整 PLT 和 PNG 放进 LLM 上下文，MCP 还提供三个路径模式工具：
+
+- `analyze_workspace_plt`：按 `provider`、`sandbox_id`、`path` 读取并分析 PLT
+- `nest_workspace_plt`：读取 PLT，将排版后的 PLT、PNG 和 JSON 写回 workspace
+- `preview_workspace_plt`：将指定版次的 PNG 写回 workspace
+
+路径模式的输入示例：
+
+```json
+{
+  "provider": "bay",
+  "sandbox_id": "sandbox-xxx",
+  "path": "input/pattern.plt",
+  "output_dir": ".mcp/plt-fabric-nester"
+}
+```
+
+返回值只包含 `input_path`、`pltPath`、`pngPath`、`manifestPath` 等引用和排版摘要，文件内容在 MCP 与 provider 之间传输，不经过 LLM 上下文。`path` 始终限制在 workspace 根目录内；Bay provider 会由 Bay API 再次执行沙箱权限校验。
+
+Shipyard 运行时会注入 `BAY_SANDBOX_ID`。沙箱内的 Python agent 可以这样取得 ID，然后将它和相对路径传给 MCP：
+
+```python
+import os
+sandbox_id = os.environ["BAY_SANDBOX_ID"]
+```
+
+MCP 不会根据 HTTP 来源或文件名猜测沙箱，因为同一个 MCP 服务可能同时服务多个沙箱；调用方必须显式提供 `sandbox_id`。若通过 Ship 的 shell 接口执行命令，应确认运行时保留了该环境变量；Python 内核或显式传入的环境变量是可靠方式。
+
+workspace 文件访问通过 `WorkspaceProvider` 接口抽象。当前内置：
+
+- `bay`：调用 Shipyard Neo/Bay 的 `/v1/sandboxes/{sandbox_id}/filesystem/*` API
+- `local`：仅在配置 `MCP_LOCAL_WORKSPACE_ROOT` 后启用的受限宿主目录 provider
+
+因此 AstrBot 只是 provider 的一种调用方；如果其他沙箱有不同的文件 API，只需实现 `WorkspaceProvider` 的 `readText`、`writeText` 和 `writeBinary`，无需修改排版工具。Bay 配置项为 `MCP_BAY_BASE_URL`（默认 `http://host.docker.internal:8114`）和 `MCP_BAY_ACCESS_TOKEN`。`MCP_WORKSPACE_PROVIDER` 选择默认 provider，`MCP_WORKSPACE_OUTPUT_DIR` 设置默认输出目录。
 
 本地启动：
 
@@ -57,8 +94,12 @@ Docker 启动：
 ```powershell
 docker build -f Dockerfile.mcp -t plt-fabric-nester-mcp:latest .
 docker run --rm -p 18192:8765 `
+  --add-host=host.docker.internal:host-gateway `
   -e MCP_HTTP_HOST=0.0.0.0 `
   -e MCP_PUBLIC_BASE_URL=http://host.docker.internal:18192 `
+  -e MCP_WORKSPACE_PROVIDER=bay `
+  -e MCP_BAY_BASE_URL=http://host.docker.internal:8114 `
+  -e MCP_BAY_ACCESS_TOKEN=your-bay-token `
   plt-fabric-nester-mcp:latest
 ```
 

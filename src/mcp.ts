@@ -18,11 +18,19 @@ import {
   type Packing,
   type Point,
 } from "./nester";
+import {
+  createWorkspaceProviderRegistry,
+  workspaceOutputRef,
+  workspaceRef,
+  type WorkspaceRef,
+} from "./workspace";
 
 const outputRoot = resolve(process.env.MCP_OUTPUT_DIR ?? join(tmpdir(), "plt-fabric-nester"));
 const httpHost = process.env.MCP_HTTP_HOST ?? process.env.MCP_FILE_HOST ?? "127.0.0.1";
 const requestedHttpPort = Number(process.env.MCP_HTTP_PORT ?? process.env.MCP_FILE_PORT ?? "8765");
 let publicBaseUrl = process.env.MCP_PUBLIC_BASE_URL?.replace(/\/$/, "");
+const workspaceProviders = createWorkspaceProviderRegistry();
+const defaultWorkspaceOutputDir = process.env.MCP_WORKSPACE_OUTPUT_DIR ?? ".mcp/plt-fabric-nester";
 
 const commonSettings = {
   fabricWidthMm: z.number().positive().default(1450).describe("可用布宽，单位毫米"),
@@ -34,6 +42,26 @@ const commonSettings = {
   allowQuarterTurns: z.boolean().default(false).describe("是否允许 90 度旋转"),
   effort: z.enum(["quick", "standard", "thorough"]).default("quick").describe("排版搜索强度"),
 };
+
+const workspaceSourceFields = {
+  provider: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/).default(workspaceProviders.defaultProvider).describe("workspace provider 名称，例如 bay 或 local"),
+  sandbox_id: z.string().min(1).max(200).optional().describe("沙箱 ID；Bay provider 必填，其他 provider 可选"),
+  path: z.string().min(1).describe("输入 PLT 在 workspace 中的相对路径，例如 input/pattern.plt"),
+};
+
+function resolveWorkspaceSource(providerName: string, sandboxId: string | undefined, path: string): { provider: ReturnType<typeof workspaceProviders.resolve>; ref: WorkspaceRef } {
+  const ref = workspaceRef(providerName, sandboxId, path);
+  return { provider: workspaceProviders.resolve(ref.provider), ref };
+}
+
+function workspaceSummary(ref: WorkspaceRef, outputFiles?: WorkspaceDownloadFile[]): Record<string, unknown> {
+  return {
+    provider: ref.provider,
+    sandbox_id: ref.sandboxId,
+    input_path: ref.path,
+    outputs: outputFiles?.map(({ pngPath: _png, ...file }) => file),
+  };
+}
 
 function jsonText(value: unknown): { type: "text"; text: string } {
   return { type: "text", text: JSON.stringify(value, null, 2) };
@@ -320,6 +348,13 @@ interface DownloadFile {
   pngBase64: string;
 }
 
+interface WorkspaceDownloadFile {
+  layout: string;
+  pltPath: string;
+  pngPath: string;
+  manifestPath: string;
+}
+
 async function saveResultFiles(result: NestResult): Promise<DownloadFile[]> {
   const id = randomUUID();
   const directory = join(outputRoot, id);
@@ -339,6 +374,46 @@ async function saveResultFiles(result: NestResult): Promise<DownloadFile[]> {
     const manifest = JSON.stringify({ layout: selected.label, summary: packingSummary(selected.packing, result.plan), settings: result.settings }, null, 2) + "\n";
     await Promise.all([writeFile(join(directory, pltName), plt, "ascii"), writeFile(join(directory, pngName), png), writeFile(join(directory, manifestName), manifest, "utf8")]);
     files.push({ layout: selected.label, pltUrl: `${base}/files/${id}/${pltName}`, pngUrl: `${base}/files/${id}/${pngName}`, manifestUrl: `${base}/files/${id}/${manifestName}`, pngBase64: png.toString("base64") });
+  }
+  return files;
+}
+
+async function saveWorkspaceResultFiles(
+  result: NestResult,
+  sourceRef: WorkspaceRef,
+  outputDir: string | undefined,
+): Promise<WorkspaceDownloadFile[]> {
+  const provider = workspaceProviders.resolve(sourceRef.provider);
+  const directory = `${outputDir ?? defaultWorkspaceOutputDir}/${randomUUID()}`;
+  const layouts: Array<"compact" | "A" | "B"> = ["compact"];
+  if (result.split) layouts.push("A", "B");
+  const files: WorkspaceDownloadFile[] = [];
+
+  for (const layout of layouts) {
+    const selected = selectedLayout(result, layout);
+    const stem = selected.fileStem;
+    const pltPath = workspaceOutputRef(sourceRef, directory, `${stem}.plt`);
+    const pngPath = workspaceOutputRef(sourceRef, directory, `${stem}.png`);
+    const manifestPath = workspaceOutputRef(sourceRef, directory, `${stem}.json`);
+    const plt = serializePlt(selected.packing, result.plan);
+    const png = renderPng(result, selected.packing, selected.materialLength);
+    const manifest = JSON.stringify({
+      layout: selected.label,
+      summary: packingSummary(selected.packing, result.plan),
+      settings: result.settings,
+      source: { provider: sourceRef.provider, sandbox_id: sourceRef.sandboxId, path: sourceRef.path },
+    }, null, 2) + "\n";
+    await Promise.all([
+      provider.writeText(pltPath, plt),
+      provider.writeBinary(pngPath, png, "image/png"),
+      provider.writeText(manifestPath, manifest),
+    ]);
+    files.push({
+      layout: selected.label,
+      pltPath: pltPath.path,
+      pngPath: pngPath.path,
+      manifestPath: manifestPath.path,
+    });
   }
   return files;
 }
@@ -383,6 +458,60 @@ function createMcpServer(): McpServer {
       const selected = files[layout === "A" ? 1 : layout === "B" ? 2 : 0];
       if (!selected) throw new Error(`当前参数没有生成 ${layout} 版。`);
       return { content: [jsonText({ layout, pngUrl: selected.pngUrl, pltUrl: selected.pltUrl, manifestUrl: selected.manifestUrl }), { type: "image", data: selected.pngBase64, mimeType: "image/png" }] };
+    } catch (error) { return errorResult(error); }
+  });
+
+  server.registerTool("analyze_workspace_plt", {
+    title: "分析 workspace 中的 PLT",
+    description: "按 provider、sandbox_id 和 workspace 相对路径读取 PLT 并分析；文件内容不会返回给模型。",
+    inputSchema: { ...workspaceSourceFields, unitsPerMm: z.number().positive().default(40).describe("HP-GL 每毫米单位数") },
+  }, async ({ provider, sandbox_id, path, unitsPerMm }) => {
+    try {
+      const source = resolveWorkspaceSource(provider, sandbox_id, path);
+      const plt = await source.provider.readText(source.ref);
+      return { content: [jsonText({ ...workspaceSummary(source.ref), analysis: sourceSummary(plt, unitsPerMm) })] };
+    } catch (error) { return errorResult(error); }
+  });
+
+  server.registerTool("nest_workspace_plt", {
+    title: "排版 workspace 中的 PLT",
+    description: "从 provider 管理的 workspace 读取 PLT，将 PLT、PNG 和 JSON 清单写回同一 workspace，只返回结果路径和摘要。",
+    inputSchema: { ...workspaceSourceFields, output_dir: z.string().min(1).optional().describe("输出目录，相对 workspace 根目录；默认 .mcp/plt-fabric-nester"), ...commonSettings },
+  }, async ({ provider, sandbox_id, path, output_dir, ...settings }) => {
+    try {
+      const source = resolveWorkspaceSource(provider, sandbox_id, path);
+      const plt = await source.provider.readText(source.ref);
+      const result = nestHpgl(plt, settings);
+      const files = await saveWorkspaceResultFiles(result, source.ref, output_dir);
+      return {
+        content: [jsonText({
+          ...workspaceSummary(source.ref, files),
+          settings: result.settings,
+          detectedParts: result.parts.length,
+          compact: packingSummary(result.full, result.plan),
+          split: result.split ? {
+            remainingLengthMm: result.split.remnantLength / result.plan.unitsPerMm,
+            A: packingSummary(result.split.remnant, result.plan),
+            B: packingSummary(result.split.newMaterial, result.plan),
+          } : null,
+        })],
+      };
+    } catch (error) { return errorResult(error); }
+  });
+
+  server.registerTool("preview_workspace_plt", {
+    title: "预览 workspace 中的 PLT",
+    description: "从 provider 管理的 workspace 读取 PLT，生成指定版次的 PNG 并写回 workspace，不把图片内容放入模型上下文。",
+    inputSchema: { ...workspaceSourceFields, output_dir: z.string().min(1).optional().describe("输出目录，相对 workspace 根目录；默认 .mcp/plt-fabric-nester"), layout: z.enum(["compact", "A", "B"]).default("compact").describe("预览总版、A 余料版或 B 新料版"), ...commonSettings },
+  }, async ({ provider, sandbox_id, path, output_dir, layout, ...settings }) => {
+    try {
+      const source = resolveWorkspaceSource(provider, sandbox_id, path);
+      const plt = await source.provider.readText(source.ref);
+      const result = nestHpgl(plt, settings);
+      const files = await saveWorkspaceResultFiles(result, source.ref, output_dir);
+      const selected = files[layout === "A" ? 1 : layout === "B" ? 2 : 0];
+      if (!selected) throw new Error(`当前参数没有生成 ${layout} 版。`);
+      return { content: [jsonText({ ...workspaceSummary(source.ref, files), selectedLayout: layout, selected })] };
     } catch (error) { return errorResult(error); }
   });
 
