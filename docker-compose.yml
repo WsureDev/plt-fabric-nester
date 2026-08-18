@@ -9,10 +9,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.mcp
-    stdin_open: true
-    tty: false
     ports:
       - "18192:8765"
     environment:
-      MCP_FILE_HOST: 0.0.0.0
-      MCP_PUBLIC_BASE_URL: http://127.0.0.1:18192
+      MCP_HTTP_HOST: 0.0.0.0
+      MCP_PUBLIC_BASE_URL: http://host.docker.internal:18192

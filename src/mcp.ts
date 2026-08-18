@@ -1,5 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { createServer } from "node:http";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -19,10 +19,9 @@ import {
   type Point,
 } from "./nester";
 
-const server = new McpServer({ name: "plt-fabric-nester", version: "1.0.0" });
 const outputRoot = resolve(process.env.MCP_OUTPUT_DIR ?? join(tmpdir(), "plt-fabric-nester"));
-const fileHost = process.env.MCP_FILE_HOST ?? "127.0.0.1";
-const requestedFilePort = Number(process.env.MCP_FILE_PORT ?? "8765");
+const httpHost = process.env.MCP_HTTP_HOST ?? process.env.MCP_FILE_HOST ?? "127.0.0.1";
+const requestedHttpPort = Number(process.env.MCP_HTTP_PORT ?? process.env.MCP_FILE_PORT ?? "8765");
 let publicBaseUrl = process.env.MCP_PUBLIC_BASE_URL?.replace(/\/$/, "");
 
 const commonSettings = {
@@ -249,12 +248,49 @@ function contentType(fileName: string): string {
   return "application/x-hpgl; charset=ascii";
 }
 
-async function startFileServer(): Promise<void> {
+function writeJsonRpcError(response: import("node:http").ServerResponse, status: number, message: string): void {
+  response.writeHead(status, { "Content-Type": "application/json; charset=utf-8", Allow: "POST, OPTIONS" });
+  response.end(JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message }, id: null }));
+}
+
+async function handleMcpRequest(request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse): Promise<void> {
+  if (request.method !== "POST") {
+    writeJsonRpcError(response, 405, "Method not allowed.");
+    return;
+  }
+
+  const mcpServer = createMcpServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+  try {
+    await mcpServer.connect(transport);
+    await transport.handleRequest(request, response);
+  } catch (error) {
+    console.error("Failed to handle MCP request:", error);
+    if (!response.headersSent) writeJsonRpcError(response, 500, "Internal server error.");
+  } finally {
+    await transport.close();
+    await mcpServer.close();
+  }
+}
+
+async function startHttpServer(): Promise<void> {
   await mkdir(outputRoot, { recursive: true });
   const httpServer = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    if (request.method === "OPTIONS") {
+      response.writeHead(204, { Allow: "POST, OPTIONS" });
+      response.end();
+      return;
+    }
+
+    if (url.pathname === "/mcp") {
+      await handleMcpRequest(request, response);
+      return;
+    }
+
     try {
-      if (!request.url?.startsWith("/files/")) { response.writeHead(404); response.end("Not found"); return; }
-      const requested = decodeURIComponent(request.url.slice("/files/".length).split("?")[0]);
+      if (!url.pathname.startsWith("/files/")) { response.writeHead(404); response.end("Not found"); return; }
+      const requested = decodeURIComponent(url.pathname.slice("/files/".length));
       const filePath = resolve(outputRoot, requested);
       const relativePath = relative(outputRoot, filePath);
       if (!relativePath || relativePath.startsWith("..") || relativePath.includes(`..${sep}`)) { response.writeHead(403); response.end("Forbidden"); return; }
@@ -268,11 +304,12 @@ async function startFileServer(): Promise<void> {
   });
   await new Promise<void>((resolveListen, reject) => {
     httpServer.once("error", reject);
-    httpServer.listen(Number.isFinite(requestedFilePort) ? requestedFilePort : 8765, fileHost, () => resolveListen());
+    httpServer.listen(Number.isFinite(requestedHttpPort) ? requestedHttpPort : 8765, httpHost, () => resolveListen());
   });
   const address = httpServer.address();
-  const port = typeof address === "object" && address !== null ? address.port : (Number.isFinite(requestedFilePort) ? requestedFilePort : 8765);
+  const port = typeof address === "object" && address !== null ? address.port : (Number.isFinite(requestedHttpPort) ? requestedHttpPort : 8765);
   publicBaseUrl ??= `http://127.0.0.1:${port}`;
+  console.error(`MCP Streamable HTTP listening at ${publicBaseUrl}/mcp`);
 }
 
 interface DownloadFile {
@@ -306,46 +343,50 @@ async function saveResultFiles(result: NestResult): Promise<DownloadFile[]> {
   return files;
 }
 
-server.registerTool("analyze_plt", {
-  title: "分析 PLT",
-  description: "分析 PLT 路径、裁片数量、原始尺寸和每个裁片的包围盒，不执行排版。",
-  inputSchema: { plt: z.string().min(1).describe("完整 HP-GL PLT 文本"), unitsPerMm: z.number().positive().default(40).describe("HP-GL 每毫米单位数") },
-}, async ({ plt, unitsPerMm }) => {
-  try { return { content: [jsonText(sourceSummary(plt, unitsPerMm))] }; } catch (error) { return errorResult(error); }
-});
+function createMcpServer(): McpServer {
+  const server = new McpServer({ name: "plt-fabric-nester", version: "1.0.0" });
 
-server.registerTool("nest_plt", {
-  title: "紧凑排版 PLT",
-  description: "按参数生成紧凑 PLT 文件和 PNG 预览，并返回可下载地址；余料不足时生成 A/B 分版。",
-  inputSchema: { plt: z.string().min(1).describe("完整 HP-GL PLT 文本"), ...commonSettings },
-}, async ({ plt, ...settings }) => {
-  try {
-    const result = nestHpgl(plt, settings);
-    const files = await saveResultFiles(result);
-    const first = files[0];
-    return {
-      content: [
-        jsonText({ settings: result.settings, detectedParts: result.parts.length, compact: packingSummary(result.full, result.plan), split: result.split ? { remainingLengthMm: result.split.remnantLength / result.plan.unitsPerMm, A: packingSummary(result.split.remnant, result.plan), B: packingSummary(result.split.newMaterial, result.plan) } : null, downloads: files.map(({ pngBase64: _png, ...file }) => file) }),
-        { type: "image", data: first.pngBase64, mimeType: "image/png" },
-      ],
-    };
-  } catch (error) { return errorResult(error); }
-});
+  server.registerTool("analyze_plt", {
+    title: "分析 PLT",
+    description: "分析 PLT 路径、裁片数量、原始尺寸和每个裁片的包围盒，不执行排版。",
+    inputSchema: { plt: z.string().min(1).describe("完整 HP-GL PLT 文本"), unitsPerMm: z.number().positive().default(40).describe("HP-GL 每毫米单位数") },
+  }, async ({ plt, unitsPerMm }) => {
+    try { return { content: [jsonText(sourceSummary(plt, unitsPerMm))] }; } catch (error) { return errorResult(error); }
+  });
 
-server.registerTool("preview_plt", {
-  title: "生成 PLT PNG 预览",
-  description: "生成指定版次的 PNG 审核预览并返回下载地址，不生成 SVG。",
-  inputSchema: { plt: z.string().min(1).describe("完整 HP-GL PLT 文本"), layout: z.enum(["compact", "A", "B"]).default("compact").describe("预览总版、A 余料版或 B 新料版"), ...commonSettings },
-}, async ({ plt, layout, ...settings }) => {
-  try {
-    const result = nestHpgl(plt, settings);
-    const files = await saveResultFiles(result);
-    const selected = files[layout === "A" ? 1 : layout === "B" ? 2 : 0];
-    if (!selected) throw new Error(`当前参数没有生成 ${layout} 版。`);
-    return { content: [jsonText({ layout, pngUrl: selected.pngUrl, pltUrl: selected.pltUrl, manifestUrl: selected.manifestUrl }), { type: "image", data: selected.pngBase64, mimeType: "image/png" }] };
-  } catch (error) { return errorResult(error); }
-});
+  server.registerTool("nest_plt", {
+    title: "紧凑排版 PLT",
+    description: "按参数生成紧凑 PLT 文件和 PNG 预览，并返回可下载地址；余料不足时生成 A/B 分版。",
+    inputSchema: { plt: z.string().min(1).describe("完整 HP-GL PLT 文本"), ...commonSettings },
+  }, async ({ plt, ...settings }) => {
+    try {
+      const result = nestHpgl(plt, settings);
+      const files = await saveResultFiles(result);
+      const first = files[0];
+      return {
+        content: [
+          jsonText({ settings: result.settings, detectedParts: result.parts.length, compact: packingSummary(result.full, result.plan), split: result.split ? { remainingLengthMm: result.split.remnantLength / result.plan.unitsPerMm, A: packingSummary(result.split.remnant, result.plan), B: packingSummary(result.split.newMaterial, result.plan) } : null, downloads: files.map(({ pngBase64: _png, ...file }) => file) }),
+          { type: "image", data: first.pngBase64, mimeType: "image/png" },
+        ],
+      };
+    } catch (error) { return errorResult(error); }
+  });
 
-await startFileServer();
-const transport = new StdioServerTransport();
-await server.connect(transport);
+  server.registerTool("preview_plt", {
+    title: "生成 PLT PNG 预览",
+    description: "生成指定版次的 PNG 审核预览并返回下载地址，不生成 SVG。",
+    inputSchema: { plt: z.string().min(1).describe("完整 HP-GL PLT 文本"), layout: z.enum(["compact", "A", "B"]).default("compact").describe("预览总版、A 余料版或 B 新料版"), ...commonSettings },
+  }, async ({ plt, layout, ...settings }) => {
+    try {
+      const result = nestHpgl(plt, settings);
+      const files = await saveResultFiles(result);
+      const selected = files[layout === "A" ? 1 : layout === "B" ? 2 : 0];
+      if (!selected) throw new Error(`当前参数没有生成 ${layout} 版。`);
+      return { content: [jsonText({ layout, pngUrl: selected.pngUrl, pltUrl: selected.pltUrl, manifestUrl: selected.manifestUrl }), { type: "image", data: selected.pngBase64, mimeType: "image/png" }] };
+    } catch (error) { return errorResult(error); }
+  });
+
+  return server;
+}
+
+await startHttpServer();

@@ -4,7 +4,7 @@ COPY package*.json ./
 RUN npm ci --ignore-scripts
 COPY tsconfig.json ./
 COPY src ./src
-ENV MCP_FILE_HOST=0.0.0.0
+ENV MCP_HTTP_HOST=0.0.0.0
 ENV MCP_PUBLIC_BASE_URL=http://127.0.0.1:8765
 EXPOSE 8765
 ENTRYPOINT ["npm", "run", "mcp"]

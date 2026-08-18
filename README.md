@@ -29,7 +29,8 @@ docker run --rm -p 18191:80 plt-fabric-nester:latest
 
 ## MCP 服务
 
-MCP 服务通过标准输入输出与 LLM 客户端通信，不需要 HTTP 端口。提供三个工具：
+MCP 服务通过 Streamable HTTP 提供，端点为 `POST /mcp`。同一 HTTP 服务也会在
+`/files/*` 提供工具生成的 PLT、PNG 和 JSON 下载文件。提供三个工具：
 
 - `analyze_plt`：分析路径、裁片数量、原始尺寸和裁片包围盒
 - `nest_plt`：生成紧凑总版；余料不足时同时返回 A 余料版和 B 新料版 PLT
@@ -37,9 +38,10 @@ MCP 服务通过标准输入输出与 LLM 客户端通信，不需要 HTTP 端�
 
 `nest_plt` 和 `preview_plt` 都支持设置布宽、裁片间距、边缘留量、栅格、单位换算、
 余料长度、是否允许 90 度旋转和排版强度。工具会返回 `pltUrl`、`pngUrl` 和
-`manifestUrl`，其中预览始终是 PNG，不生成 SVG。下载地址由 MCP 内置文件服务提供，
-默认监听 `127.0.0.1:8765`；Compose 会将它发布到主机的 `18192` 端口。可通过 `MCP_OUTPUT_DIR`、`MCP_FILE_HOST`、
-`MCP_FILE_PORT`、`MCP_PUBLIC_BASE_URL` 环境变量调整输出目录和地址。
+`manifestUrl`，其中预览始终是 PNG，不生成 SVG。MCP 和下载地址由同一服务提供，
+默认监听 `127.0.0.1:8765`；Compose 会将它发布到主机的 `18192` 端口。可通过 `MCP_OUTPUT_DIR`、`MCP_HTTP_HOST`、
+`MCP_HTTP_PORT`、`MCP_PUBLIC_BASE_URL` 环境变量调整输出目录和地址；`MCP_FILE_HOST` 与
+`MCP_FILE_PORT` 仍兼容为旧环境变量别名。
 
 本地启动：
 
@@ -48,13 +50,15 @@ npm install
 npm run mcp
 ```
 
+MCP URL：`http://127.0.0.1:8765/mcp`。
+
 Docker 启动：
 
 ```powershell
 docker build -f Dockerfile.mcp -t plt-fabric-nester-mcp:latest .
-docker run --rm -i -p 18192:8765 `
-  -e MCP_FILE_HOST=0.0.0.0 `
-  -e MCP_PUBLIC_BASE_URL=http://127.0.0.1:18192 `
+docker run --rm -p 18192:8765 `
+  -e MCP_HTTP_HOST=0.0.0.0 `
+  -e MCP_PUBLIC_BASE_URL=http://host.docker.internal:18192 `
   plt-fabric-nester-mcp:latest
 ```
 
@@ -64,17 +68,16 @@ MCP 客户端配置示例：
 {
   "mcpServers": {
     "plt-fabric-nester": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i", "-p", "18192:8765",
-        "-e", "MCP_FILE_HOST=0.0.0.0",
-        "-e", "MCP_PUBLIC_BASE_URL=http://127.0.0.1:18192",
-        "plt-fabric-nester-mcp:latest"
-      ]
+      "url": "http://host.docker.internal:18192/mcp"
     }
   }
 }
 ```
+
+与本服务位于同一 Compose 网络的客户端应使用 `http://mcp:8765/mcp`。Linux 上使用
+`host.docker.internal` 的其他容器需要配置 `host-gateway` 映射。
+本 Compose 部署面向独立容器调用，MCP URL 为 `http://host.docker.internal:18192/mcp`；
+宿主机浏览器访问网页仍使用 `http://localhost:18191/`。
 
 生产构建：
 
