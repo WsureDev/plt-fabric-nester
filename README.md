@@ -64,7 +64,13 @@ MCP 服务通过 Streamable HTTP 提供，端点为 `POST /mcp`。同一 HTTP �
 
 返回值只包含 `input_path`、`pltPath`、`pngPath`、`manifestPath` 等引用和排版摘要，文件内容在 MCP 与 provider 之间传输，不经过 LLM 上下文。`path` 始终限制在 workspace 根目录内；Bay provider 会由 Bay API 再次执行沙箱权限校验。
 
-Shipyard 运行时会注入 `BAY_SANDBOX_ID`。沙箱内的 Python agent 可以这样取得 ID，然后将它和相对路径传给 MCP：
+Shipyard 运行时会注入 `BAY_SANDBOX_ID`。沙箱内的 agent 可以用下面的命令取得 ID，然后将它和相对路径传给 MCP：
+
+```bash
+sudo tr '\0' '\n' < /proc/1/environ | grep BAY_SANDBOX_ID
+```
+
+也可以在 Python agent 中读取：
 
 ```python
 import os

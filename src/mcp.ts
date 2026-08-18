@@ -43,9 +43,11 @@ const commonSettings = {
   effort: z.enum(["quick", "standard", "thorough"]).default("quick").describe("排版搜索强度"),
 };
 
+const sandboxIdGuide = "在 Shipyard 沙箱内获取 sandbox_id：执行 `sudo tr '\\0' '\\n' < /proc/1/environ | grep BAY_SANDBOX_ID`，将输出中的值传入 sandbox_id；可带或不带 sandbox- 前缀。";
+
 const workspaceSourceFields = {
   provider: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/).default(workspaceProviders.defaultProvider).describe("workspace provider 名称，例如 bay 或 local"),
-  sandbox_id: z.string().min(1).max(200).optional().describe("沙箱 ID；Bay provider 必填，其他 provider 可选"),
+  sandbox_id: z.string().min(1).max(200).optional().describe(`沙箱 ID；Bay provider 必填，其他 provider 可选。${sandboxIdGuide}`),
   path: z.string().min(1).describe("输入 PLT 在 workspace 中的相对路径，例如 input/pattern.plt"),
 };
 
@@ -463,7 +465,7 @@ function createMcpServer(): McpServer {
 
   server.registerTool("analyze_workspace_plt", {
     title: "分析 workspace 中的 PLT",
-    description: "按 provider、sandbox_id 和 workspace 相对路径读取 PLT 并分析；文件内容不会返回给模型。",
+    description: `按 provider、sandbox_id 和 workspace 相对路径读取 PLT 并分析；文件内容不会返回给模型。${sandboxIdGuide}`,
     inputSchema: { ...workspaceSourceFields, unitsPerMm: z.number().positive().default(40).describe("HP-GL 每毫米单位数") },
   }, async ({ provider, sandbox_id, path, unitsPerMm }) => {
     try {
@@ -475,7 +477,7 @@ function createMcpServer(): McpServer {
 
   server.registerTool("nest_workspace_plt", {
     title: "排版 workspace 中的 PLT",
-    description: "从 provider 管理的 workspace 读取 PLT，将 PLT、PNG 和 JSON 清单写回同一 workspace，只返回结果路径和摘要。",
+    description: `从 provider 管理的 workspace 读取 PLT，将 PLT、PNG 和 JSON 清单写回同一 workspace，只返回结果路径和摘要。${sandboxIdGuide}`,
     inputSchema: { ...workspaceSourceFields, output_dir: z.string().min(1).optional().describe("输出目录，相对 workspace 根目录；默认 .mcp/plt-fabric-nester"), ...commonSettings },
   }, async ({ provider, sandbox_id, path, output_dir, ...settings }) => {
     try {
@@ -501,7 +503,7 @@ function createMcpServer(): McpServer {
 
   server.registerTool("preview_workspace_plt", {
     title: "预览 workspace 中的 PLT",
-    description: "从 provider 管理的 workspace 读取 PLT，生成指定版次的 PNG 并写回 workspace，不把图片内容放入模型上下文。",
+    description: `从 provider 管理的 workspace 读取 PLT，生成指定版次的 PNG 并写回 workspace，不把图片内容放入模型上下文。${sandboxIdGuide}`,
     inputSchema: { ...workspaceSourceFields, output_dir: z.string().min(1).optional().describe("输出目录，相对 workspace 根目录；默认 .mcp/plt-fabric-nester"), layout: z.enum(["compact", "A", "B"]).default("compact").describe("预览总版、A 余料版或 B 新料版"), ...commonSettings },
   }, async ({ provider, sandbox_id, path, output_dir, layout, ...settings }) => {
     try {
