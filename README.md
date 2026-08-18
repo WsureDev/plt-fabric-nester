@@ -71,7 +71,7 @@ import os
 sandbox_id = os.environ["BAY_SANDBOX_ID"]
 ```
 
-MCP 不会根据 HTTP 来源或文件名猜测沙箱，因为同一个 MCP 服务可能同时服务多个沙箱；调用方必须显式提供 `sandbox_id`。若通过 Ship 的 shell 接口执行命令，应确认运行时保留了该环境变量；Python 内核或显式传入的环境变量是可靠方式。
+MCP 接受带或不带 `sandbox-` 前缀的 `sandbox_id`，例如 `28a0ae9198b4` 和 `sandbox-28a0ae9198b4` 等价；服务内部会统一使用带前缀的形式。MCP 不会根据 HTTP 来源或文件名猜测沙箱，因为同一个 MCP 服务可能同时服务多个沙箱；调用方必须显式提供 `sandbox_id`。若通过 Ship 的 shell 接口执行命令，应确认运行时保留了该环境变量；Python 内核或显式传入的环境变量是可靠方式。
 
 workspace 文件访问通过 `WorkspaceProvider` 接口抽象。当前内置：
 

@@ -3,13 +3,19 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { BayWorkspaceProvider, LocalWorkspaceProvider, normalizeWorkspacePath, workspaceRef } from "../src/workspace.ts";
+import { BayWorkspaceProvider, LocalWorkspaceProvider, normalizeSandboxId, normalizeWorkspacePath, workspaceRef } from "../src/workspace.ts";
 
 test("normalizes workspace-relative paths and rejects escapes", () => {
   assert.equal(normalizeWorkspacePath("/workspace/input/pattern.plt"), "input/pattern.plt");
   assert.equal(normalizeWorkspacePath("input/../output/result.plt"), "output/result.plt");
   assert.throws(() => normalizeWorkspacePath("../secret.plt"));
   assert.throws(() => normalizeWorkspacePath("/etc/passwd"));
+});
+
+test("accepts Bay sandbox IDs with or without the sandbox- prefix", () => {
+  assert.equal(normalizeSandboxId("28a0ae9198b4"), "sandbox-28a0ae9198b4");
+  assert.equal(normalizeSandboxId("sandbox-28a0ae9198b4"), "sandbox-28a0ae9198b4");
+  assert.throws(() => normalizeSandboxId("sandbox-../escape"));
 });
 
 test("local provider confines reads and writes to its configured root", async () => {
@@ -42,10 +48,13 @@ test("Bay provider reads through the sandbox filesystem API", async () => {
 
   try {
     const provider = new BayWorkspaceProvider({ baseUrl: "https://bay.example/", accessToken: "test-token" });
-    const content = await provider.readText(workspaceRef("bay", "sandbox 1", "/workspace/input/pattern.plt"));
+    const content = await provider.readText(workspaceRef("bay", "abc123", "/workspace/input/pattern.plt"));
     assert.equal(content, "PU0,0;");
-    assert.equal(url, "https://bay.example/v1/sandboxes/sandbox%201/filesystem/files?path=input%2Fpattern.plt");
+    assert.equal(url, "https://bay.example/v1/sandboxes/sandbox-abc123/filesystem/files?path=input%2Fpattern.plt");
     assert.equal(authorization, "Bearer test-token");
+
+    await provider.readText(workspaceRef("bay", "sandbox-abc123", "input/pattern.plt"));
+    assert.equal(url, "https://bay.example/v1/sandboxes/sandbox-abc123/filesystem/files?path=input%2Fpattern.plt");
   } finally {
     globalThis.fetch = originalFetch;
   }

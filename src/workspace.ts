@@ -45,11 +45,18 @@ function validateProviderName(name: string): string {
   return normalized;
 }
 
+export function normalizeSandboxId(input: string): string {
+  const raw = input.trim();
+  if (!raw || raw.length > 200 || /[\r\n]/.test(raw)) throw new Error("sandbox_id 无效。");
+  const canonical = raw.startsWith("sandbox-") ? raw : `sandbox-${raw}`;
+  if (!/^sandbox-[A-Za-z0-9][A-Za-z0-9._-]*$/.test(canonical)) throw new Error("sandbox_id 无效。");
+  return canonical;
+}
+
 function requireSandboxId(ref: WorkspaceRef): string {
   const sandboxId = ref.sandboxId?.trim();
   if (!sandboxId) throw new Error(`provider=${ref.provider} 需要 sandbox_id。`);
-  if (sandboxId.length > 200 || /[\r\n]/.test(sandboxId)) throw new Error("sandbox_id 无效。");
-  return sandboxId;
+  return normalizeSandboxId(sandboxId);
 }
 
 function joinWorkspacePath(directory: string, fileName: string): string {
@@ -207,7 +214,12 @@ export function createWorkspaceProviderRegistry(): WorkspaceProviderRegistry {
 }
 
 export function workspaceRef(provider: string, sandboxId: string | undefined, path: string): WorkspaceRef {
-  return { provider: validateProviderName(provider), sandboxId, path: normalizeWorkspacePath(path) };
+  const normalizedProvider = validateProviderName(provider);
+  return {
+    provider: normalizedProvider,
+    sandboxId: normalizedProvider === "bay" && sandboxId !== undefined ? normalizeSandboxId(sandboxId) : sandboxId,
+    path: normalizeWorkspacePath(path),
+  };
 }
 
 export function workspaceOutputRef(base: WorkspaceRef, directory: string, fileName: string): WorkspaceRef {
