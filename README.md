@@ -67,7 +67,7 @@ MCP 服务通过 Streamable HTTP 提供，端点为 `POST /mcp`。同一 HTTP �
 Shipyard 运行时会注入 `BAY_SANDBOX_ID`。沙箱内的 agent 可以用下面的命令取得 ID，然后将它和相对路径传给 MCP：
 
 ```bash
-sudo tr '\0' '\n' < /proc/1/environ | grep BAY_SANDBOX_ID
+sudo bash -c "tr '\0' '\n' < /proc/1/environ | grep BAY_SANDBOX_ID"
 ```
 
 也可以在 Python agent 中读取：

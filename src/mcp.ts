@@ -43,7 +43,7 @@ const commonSettings = {
   effort: z.enum(["quick", "standard", "thorough"]).default("quick").describe("排版搜索强度"),
 };
 
-const sandboxIdGuide = "在 Shipyard 沙箱内获取 sandbox_id：执行 `sudo tr '\\0' '\\n' < /proc/1/environ | grep BAY_SANDBOX_ID`，将输出中的值传入 sandbox_id；可带或不带 sandbox- 前缀。";
+const sandboxIdGuide = "在 Shipyard 沙箱内获取 sandbox_id：执行 `sudo bash -c \"tr '\\0' '\\n' < /proc/1/environ | grep BAY_SANDBOX_ID\"`，将输出中的值传入 sandbox_id；可带或不带 sandbox- 前缀。";
 
 const workspaceSourceFields = {
   provider: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/).default(workspaceProviders.defaultProvider).describe("workspace provider 名称，例如 bay 或 local"),
